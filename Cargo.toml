@@ -1,0 +1,11 @@
+[package]
+name = "subsmerge"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0.89"
+clap = { version = "4.5.19", features = ["derive"] }
+derivative = "2.2.0"
+image = "0.25.2"
+nom = "5"
