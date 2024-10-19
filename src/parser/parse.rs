@@ -2,6 +2,8 @@ extern crate nom;
 
 use crate::parser::types::*;
 
+const OFFSET: u16 = 0;
+
 use self::nom::{
     branch::alt,
     bytes::complete::tag,
@@ -85,7 +87,7 @@ fn parse_segment_object_definition<'a, E: ParseError<&'a [u8]>>(_size: u16) -> i
         Ok((
             rest,
             Segment::ObjectDefinition(ObjectDefinition {
-                id,
+                object_id: id,
                 version,
                 is_last_in_sequence: (flag_raw & 0x40) != 0,
                 is_first_in_sequence: (flag_raw & 0x80) != 0,
@@ -99,7 +101,7 @@ fn parse_segment_object_definition<'a, E: ParseError<&'a [u8]>>(_size: u16) -> i
 
 fn serialize_object_definition(obj: &ObjectDefinition) -> Vec<u8> {
     let mut seg_buf = vec![];
-    seg_buf.extend_from_slice(&obj.id.to_be_bytes());
+    seg_buf.extend_from_slice(&obj.object_id.to_be_bytes());
     seg_buf.push(obj.version);
     seg_buf.push(get_object_flag(obj));
     let mut rle_buf = vec![];
@@ -185,12 +187,12 @@ fn parse_segment_presentation_composition<'a, E: ParseError<&'a [u8]>>(_: u16) -
                 count(context("composition_object", parse_composition_object), objects_count as usize)
             }),
         )),
-        |(width, height, frame_rate, number, state, palette_update, palette_id, objects)| {
+        |(width, height, frame_rate, composition_number, state, palette_update, palette_id, objects)| {
             Segment::PresentationComposition(PresentationComposition {
                 width,
                 height,
                 frame_rate,
-                number,
+                composition_number,
                 state,
                 palette_update,
                 palette_id,
@@ -240,7 +242,7 @@ fn serialize_presentation_composition(pcs: &PresentationComposition) -> Vec<u8> 
     seg_buf.extend_from_slice(&pcs.width.to_be_bytes());
     seg_buf.extend_from_slice(&pcs.height.to_be_bytes());
     seg_buf.push(pcs.frame_rate);
-    seg_buf.extend_from_slice(&pcs.number.to_be_bytes());
+    seg_buf.extend_from_slice(&pcs.composition_number.to_be_bytes());
     seg_buf.push(match pcs.state {
         CompositionState::Normal => 0x00,
         CompositionState::AcquisitionPoint => 0x40,
@@ -269,7 +271,7 @@ fn serialize_composition_object(obj: &CompositionObject) -> Vec<u8> {
         }
     }
     obj_buf.extend_from_slice(&obj.x.to_be_bytes());
-    obj_buf.extend_from_slice(&obj.y.to_be_bytes());
+    obj_buf.extend_from_slice(&(if obj.y >= OFFSET { obj.y - OFFSET } else { obj.y }).to_be_bytes());
     match &obj.crop {
         CompositionObjectCrop::NotCropped => {}
         CompositionObjectCrop::Cropped { x, y, width, height } => {
@@ -330,8 +332,8 @@ pub fn get_packet<'a, E: ParseError<&'a [u8]>>(input: &'a [u8]) -> IResult<&'a [
                 )),
             ),
             |(pts, dts, segment)| Packet {
-                pts,
-                dts,
+                presentation_timestamp: pts,
+                decoding_timestamp_unused: dts,
                 segment,
                 raw: None,
             },
@@ -342,8 +344,8 @@ pub fn get_packet<'a, E: ParseError<&'a [u8]>>(input: &'a [u8]) -> IResult<&'a [
 pub fn serialize_packet(packet: &Packet) -> Vec<u8> {
     let mut buf = Vec::new();
     buf.extend_from_slice(b"PG");
-    buf.extend_from_slice(&packet.pts.to_be_bytes());
-    buf.extend_from_slice(&packet.dts.to_be_bytes());
+    buf.extend_from_slice(&packet.presentation_timestamp.to_be_bytes());
+    buf.extend_from_slice(&packet.decoding_timestamp_unused.to_be_bytes());
     buf.extend_from_slice(&serialize_segment(&packet.segment));
     buf
 }
@@ -380,7 +382,7 @@ fn serialize_window_definition(wds: &Vec<WindowDefinition>) -> Vec<u8> {
     for win in wds {
         seg_buf.push(win.id);
         seg_buf.extend_from_slice(&win.x.to_be_bytes());
-        seg_buf.extend_from_slice(&win.y.to_be_bytes());
+        seg_buf.extend_from_slice(&(if win.y >= OFFSET { win.y - OFFSET } else { win.y }).to_be_bytes());
         seg_buf.extend_from_slice(&win.width.to_be_bytes());
         seg_buf.extend_from_slice(&win.height.to_be_bytes());
     }
